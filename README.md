@@ -1,11 +1,11 @@
 # Sistema EDA + NF-e Validator
 
-**Versão:** 1.1.0
+**Versão:** 1.2.0
 **Módulos:**
 - **CSVEDA** - Análise Exploratória de Dados com IA (Multi-Provider)
 - **NF-e Validator** - Validação Fiscal Automatizada para Setor Sucroalcooleiro
 
-Sistema integrado que combina análise exploratória de dados CSV com validação fiscal automatizada de NF-e, utilizando agentes de IA com suporte para múltiplos provedores (Gemini, OpenAI, Grok).
+Sistema integrado que combina análise exploratória de dados CSV com validação fiscal automatizada de NF-e, utilizando agentes de IA com suporte para **4 provedores**: Gemini, OpenAI, Claude e Groq.
 
 ---
 
@@ -15,8 +15,13 @@ Este sistema oferece **duas funcionalidades complementares** em uma única aplic
 
 ### 📊 Módulo CSVEDA (Original)
 - Análise exploratória de dados CSV/ZIP
-- **Suporte a 3 provedores de IA**: Google Gemini 2.5, OpenAI GPT-4, Grok (xAI)
-- Seleção automática de API por prioridade (Gemini > OpenAI > Grok)
+- **Suporte a 4 provedores de IA**:
+  - Google Gemini (1.5 Pro, 2.0 Flash Exp, 2.5 Flash)
+  - OpenAI GPT (GPT-4o, GPT-4o Mini)
+  - **Claude (Anthropic)** - Claude 3.5 Sonnet - NOVO ✨
+  - Groq (Llama 3.3 70B)
+- Seleção de provedor via dropdown unificado
+- Modelos padrão inteligentes + suporte a aliases
 - Geração automática de gráficos e insights
 - Pipeline de processamento de dados
 - Mesclagem de múltiplos arquivos CSV
@@ -92,10 +97,11 @@ src/
 - **CSV Local** (`base_validacao.csv` - 35+ regras editáveis)
 - **SQLite** (`rules.db` - base padrão)
 - **LangChain** (ReAct agent pattern)
-- **Provedores de IA**:
-  - **Google Gemini 2.5** Flash/Pro (padrão recomendado)
-  - **OpenAI GPT-4** / GPT-4o Mini
-  - **Grok** (xAI Beta)
+- **Provedores de IA** (v1.2.0):
+  - **Google Gemini** - 1.5 Pro, 2.0 Flash Exp, 2.5 Flash (padrão)
+  - **OpenAI** - GPT-4o, GPT-4o Mini
+  - **Claude (Anthropic)** - Claude 3.5 Sonnet (NOVO)
+  - **Groq** - Llama 3.3 70B Versatile
 - **Streamlit** (Interface unificada)
 - **Pandas** (processamento sem limites)
 
@@ -151,9 +157,9 @@ A aplicação abrirá com **duas tabs**:
 **Passo a passo:**
 
 1. **Configurar API de IA** (sidebar):
-   - Escolha um provedor: **Gemini** (recomendado), **OpenAI** ou **Grok**
-   - Insira a chave da API correspondente
-   - Sistema detecta automaticamente qual API usar por prioridade
+   - **Selecione o provedor** no dropdown: Gemini / OpenAI / Claude / Groq
+   - (Opcional) Especifique o modelo preferencial
+   - Insira a **API Key** correspondente ao provedor
    - Clique em "🚀 Inicializar Modelo"
    - Base fiscal é carregada automaticamente
 
@@ -592,8 +598,9 @@ python tests/test_integration.py
 **Agentes de IA:**
 - EDA: Agentes especializados em análise exploratória
 - NF-e: Agente opcional para classificação NCM
-- **Suporte multi-provider**: Gemini 2.5, OpenAI GPT-4, Grok
-- **Seleção automática** por prioridade configurável
+- **Suporte multi-provider** (v1.2.0): Gemini, OpenAI, Claude, Groq
+- **Seleção via dropdown** - Interface unificada
+- **Modelos padrão inteligentes** + aliases
 - ReAct pattern (Reasoning + Acting)
 
 ---
@@ -666,18 +673,28 @@ MIT License
 
 ## 📝 Changelog
 
-### v1.1.0 (Atual) - Suporte Multi-Provider IA ✅
+### v1.2.0 (Atual) - Suporte a Claude + UX Melhorada ✅
 
-**Suporte para múltiplos provedores de IA e melhorias de UX**
+**4º provedor de IA e interface unificada**
 
-- ✅ **Suporte a 3 provedores de IA**: Gemini, OpenAI GPT-4, Grok (xAI)
-- ✅ **Seleção automática de API** por prioridade (Gemini > OpenAI > Grok)
+- ✅ **Suporte a Claude (Anthropic)** - Claude 3.5 Sonnet
+- ✅ **Total de 4 provedores**: Gemini, OpenAI, Claude, Groq
+- ✅ **Dropdown unificado** - Seleção de provedor simplificada
+- ✅ **Modelos padrão inteligentes** - Não precisa decorar nomes
+- ✅ **Sistema de aliases** - Apelidos para modelos (flash, gpt4o-mini, etc)
+- ✅ **Normalização automática** - Aceita variações de nomes
+- ✅ **Campo de modelo opcional** - Usa padrão se omitido
+- ✅ **Auto-população de database** - Executado automaticamente no startup
+- ✅ **Variáveis de ambiente** - Configuração automática por provedor
+
+**Detalhes:** Veja `CHANGELOG_v1.2.0.md` para lista completa de mudanças
+
+### v1.1.0 - Suporte Multi-Provider IA ✅
+
+- ✅ **Suporte a 3 provedores de IA**: Gemini, OpenAI, Grok
 - ✅ **Carregamento automático da base fiscal** ao inicializar modelo
-- ✅ **Interface simplificada** - Redução de 3 para 2 passos no fluxo
-- ✅ **Todas camadas de validação ativas por padrão** (CSV + SQLite + LLM)
-- ✅ **Melhorias visuais** - Contraste otimizado (texto branco em fundo azul escuro)
-- ✅ **Display de modelos atualizado** - Layout 3 colunas com indicador dinâmico
-- ✅ **Dependências atualizadas** - matplotlib, seaborn, plotly, langchain-openai
+- ✅ **Interface simplificada** - Redução de passos no fluxo
+- ✅ **Melhorias visuais** - Contraste otimizado
 - ✅ **Arquitetura multi-modelo** - Agente EDA suporta múltiplos backends
 
 ### v1.0.0 - Sistema Completo Integrado ✅

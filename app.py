@@ -45,54 +45,6 @@ try:
 except ImportError:
     NFE_VALIDATOR_AVAILABLE = False
 
-# Auto-popular database na primeira execução
-def ensure_database_populated():
-    """Garante que o database está populado na primeira execução"""
-    import sqlite3
-    import json
-
-    db_path = current_dir / "src" / "database" / "rules.db"
-    schema_path = current_dir / "src" / "database" / "schema.sql"
-
-    # Verificar se database existe e tem dados
-    if db_path.exists():
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT COUNT(*) FROM ncm_rules")
-            count = cursor.fetchone()[0]
-            conn.close()
-            if count > 0:
-                return  # Database já populado
-        except:
-            conn.close()
-
-    # Popular database
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not schema_path.exists():
-        return
-
-    # Importar e executar populate_db
-    sys.path.insert(0, str(current_dir / "scripts"))
-    try:
-        from populate_db import DatabasePopulator
-        populator = DatabasePopulator(str(db_path))
-        populator.connect()
-        populator.create_schema(str(schema_path))
-        populator.populate_ncm_rules()
-        populator.populate_pis_cofins_rules()
-        populator.populate_cfop_rules()
-        populator.populate_state_overrides()
-        populator.populate_legal_refs()
-        populator.update_metadata()
-        populator.close()
-    except Exception as e:
-        pass  # Silencioso para não quebrar a aplicação
-
-# Executar na inicialização
-ensure_database_populated()
-
 # Configuração da página Streamlit
 st.set_page_config(
     page_title="Sistema EDA - Análise Exploratória de Dados",
@@ -202,27 +154,37 @@ def initialize_session_state():
         st.session_state.charts_generated = []
     if 'session_charts' not in st.session_state:
         st.session_state.session_charts = []
+    if 'selected_provider' not in st.session_state:
+        st.session_state.selected_provider = "gemini"
+    if 'selected_model_name' not in st.session_state:
+        st.session_state.selected_model_name = ""
     if 'selected_model' not in st.session_state:
-        st.session_state.selected_model = "gemini"
+        st.session_state.selected_model = st.session_state.selected_provider
     if 'model_initialized' not in st.session_state:
         st.session_state.model_initialized = False
 
-def initialize_model(model_type: str, api_key: str = None) -> tuple:
+def initialize_model(provider: str, api_key: str = None, model_name: str = None) -> tuple:
     """Inicializar modelo selecionado"""
     try:
-        # Configurar diretórios
+        # Configurar diretorios
         setup_directories()
 
-        # Criar agente com modelo selecionado - SEMPRE COM AGENTES
-        agent = EDAAgent(model_type=model_type, api_key=api_key)
+        # Criar agente com modelo selecionado - sempre com agentes
+        agent = EDAAgent(provider=provider, model=model_name, api_key=api_key)
+        provider_display = {
+            'gemini': 'Google Gemini',
+            'openai': 'OpenAI',
+            'claude': 'Claude',
+            'groq': 'Groq',
+        }.get(provider, provider.replace('_', ' ').title())
 
         if agent.api_available:
-            return True, agent, f"✅ {model_type.title()} inicializado com agentes!"
-        else:
-            return False, None, f"❌ Falha ao inicializar {model_type.title()}. Verifique configuração."
+            return True, agent, f"[OK] {provider_display} inicializado com agentes."
+        return False, None, f"[ERRO] Falha ao inicializar {provider_display}. Verifique configuracao."
 
-    except Exception as e:
-        return False, None, f"❌ Erro: {str(e)}"
+    except Exception as e:  # noqa: BLE001
+        return False, None, f"[ERRO] {str(e)}"
+
 
 def analyze_csv_structure(file_content):
     """Analisar estrutura do CSV para detectar o melhor separador e formato"""
@@ -274,9 +236,9 @@ def preprocess_csv_data(uploaded_file):
                 for sep, info in structure_analysis.items():
                     sep_name = {',' : 'Vírgula', ';': 'Ponto-e-vírgula', '\t': 'Tab', '|': 'Pipe'}[sep]
                     st.write(f"**{sep_name} ('{sep}'):**")
-                    st.write(f"  • Média de colunas: {info['avg_columns']:.1f}")
-                    st.write(f"  • Consistência: {info['consistency']*100:.1f}%")
-                    st.write(f"  • Amostras: {info['sample_columns']}")
+                    st.write(f"  - Média de colunas: {info['avg_columns']:.1f}")
+                    st.write(f"  - Consistência: {info['consistency']*100:.1f}%")
+                    st.write(f"  - Amostras: {info['sample_columns']}")
 
         # Escolher melhor separador baseado na análise
         best_separator = None
@@ -526,16 +488,16 @@ def load_and_analyze_data(uploaded_file, agent):
 
             with col_detail1:
                 st.write("**📊 Estatísticas Gerais:**")
-                st.write(f"• Total de linhas: {resumo['total_rows']:,}")
-                st.write(f"• Total de colunas: {resumo['total_columns']}")
-                st.write(f"• Valores ausentes tratados: {resumo['total_missing_values']:,}")
-                st.write(f"• Uso de memória: {resumo['memory_usage_mb']} MB")
+                st.write(f"- Total de linhas: {resumo['total_rows']:,}")
+                st.write(f"- Total de colunas: {resumo['total_columns']}")
+                st.write(f"- Valores ausentes tratados: {resumo['total_missing_values']:,}")
+                st.write(f"- Uso de memória: {resumo['memory_usage_mb']} MB")
 
             with col_detail2:
                 st.write("**🔧 Tipos de Dados Detectados:**")
-                st.write(f"• Numéricas: {resumo['numeric_columns_count']}")
-                st.write(f"• Categóricas: {resumo['categorical_columns_count']}")
-                st.write(f"• Data/Hora: {resumo['datetime_columns_count']}")
+                st.write(f"- Numéricas: {resumo['numeric_columns_count']}")
+                st.write(f"- Categóricas: {resumo['categorical_columns_count']}")
+                st.write(f"- Data/Hora: {resumo['datetime_columns_count']}")
 
             # Mostrar colunas por tipo
             if resumo['columns_by_type']['numeric']:
@@ -551,7 +513,7 @@ def load_and_analyze_data(uploaded_file, agent):
 
             # Mostrar amostra dos dados tratados
             st.write("**👀 Amostra dos Dados Tratados:**")
-            st.dataframe(df_tratado.head(5), width="stretch")
+            st.dataframe(df_tratado.head(5), use_container_width=True)
 
         # Verificar se é dataset de detecção de fraude
         expected_columns = ['Time'] + [f'V{i}' for i in range(1, 29)] + ['Amount', 'Class']
@@ -1598,6 +1560,7 @@ def render_nfe_validator_tab():
 
 def main():
     """Função principal da aplicação Streamlit"""
+    global os
     initialize_session_state()
 
     # Cabeçalho principal
@@ -1616,75 +1579,119 @@ def main():
         tab_eda = st.container()
         tab_nfe = None
 
-    # Sidebar para configurações
+    # Sidebar para configuracoes
     with st.sidebar:
-        st.header("⚙️ Configurações")
+        st.header("Configuracoes")
 
-        # Seção de API Keys
-        st.subheader("🔑 Chaves de API")
+        st.subheader("Chaves de API")
 
-        with st.expander("🤖 Configurar APIs de IA", expanded=True):
-            # Google Gemini API Key
-            gemini_api_key = st.text_input(
-                "Google Gemini API Key:",
-                type="password",
-                help="Obtenha sua chave em: https://makersuite.google.com/app/apikey",
-                key="gemini_api_key_input"
-            )
+        provider_catalog = {
+            "gemini": {
+                "display": "Google Gemini",
+                "help": "Obtenha sua chave em: https://makersuite.google.com/app/apikey",
+                "env": "GOOGLE_API_KEY",
+                "state_key": "gemini_api_key",
+                "default_model": "gemini-1.5-pro",
+            },
+            "openai": {
+                "display": "OpenAI",
+                "help": "Crie sua chave em: https://platform.openai.com/api-keys",
+                "env": "OPENAI_API_KEY",
+                "state_key": "openai_api_key",
+                "default_model": "gpt-4o-mini",
+            },
+            "claude": {
+                "display": "Claude (Anthropic)",
+                "help": "Solicite uma chave em: https://console.anthropic.com",
+                "env": "ANTHROPIC_API_KEY",
+                "state_key": "claude_api_key",
+                "default_model": "claude-3-5-sonnet-20240620",
+            },
+            "groq": {
+                "display": "Groq (Llama 3.3)",
+                "help": "Obtenha sua chave em: https://console.groq.com/keys",
+                "env": "GROQ_API_KEY",
+                "state_key": "groq_api_key",
+                "default_model": "llama-3.3-70b-versatile",
+            },
+        }
 
-            # OpenAI API Key
-            openai_api_key = st.text_input(
-                "OpenAI API Key:",
-                type="password",
-                help="Obtenha sua chave em: https://platform.openai.com/api-keys",
-                key="openai_api_key_input"
-            )
+        provider_order = list(provider_catalog.keys())
+        current_provider = st.session_state.get("selected_provider", "gemini")
+        if current_provider not in provider_order:
+            current_provider = "gemini"
 
-            # Grok API Key
-            grok_api_key = st.text_input(
-                "Grok API Key:",
-                type="password",
-                help="Obtenha sua chave em: https://x.ai",
-                key="grok_api_key_input"
-            )
+        provider_index = provider_order.index(current_provider)
+        provider_choice = st.selectbox(
+            "Selecionar provedor LLM",
+            provider_order,
+            index=provider_index,
+            format_func=lambda key: provider_catalog[key]["display"],
+            key="provider_choice_select",
+        )
+        st.session_state.selected_provider = provider_choice
 
-        # Salvar API keys no session_state
-        if gemini_api_key:
-            st.session_state.gemini_api_key = gemini_api_key
-        if openai_api_key:
-            st.session_state.openai_api_key = openai_api_key
-        if grok_api_key:
-            st.session_state.grok_api_key = grok_api_key
+        default_model = provider_catalog[provider_choice]["default_model"]
+        model_input_key = f"{provider_choice}_model_override"
+        model_help = (
+            f"Deixe em branco para usar o modelo padrao ({default_model})."
+            if default_model
+            else None
+        )
+        model_override = st.text_input(
+            "Modelo preferencial (opcional)",
+            key=model_input_key,
+            placeholder=default_model,
+            help=model_help,
+        ).strip()
 
-        # Determinar qual API usar baseado nas chaves fornecidas
-        if gemini_api_key:
-            model_option = "gemini"
-            api_key = gemini_api_key
-        elif openai_api_key:
-            model_option = "openai"
-            api_key = openai_api_key
-        elif grok_api_key:
-            model_option = "grok"
-            api_key = grok_api_key
-        else:
-            model_option = None
-            api_key = None
+        provider_info = provider_catalog[provider_choice]
+        state_key = provider_info["state_key"]
+        env_var = provider_info["env"]
+        if state_key not in st.session_state:
+            st.session_state[state_key] = ""
 
-        # Botão de inicialização
-        if st.button("🚀 Inicializar Modelo", type="primary"):
-            if not api_key:
-                st.error("❌ Por favor, forneça pelo menos uma chave de API (Gemini, OpenAI ou Grok)")
+        st.text_input(
+            f"{provider_info['display']} API Key:",
+            type="password",
+            key=state_key,
+            help=f"{provider_info['help']} (env: {env_var})",
+            value=st.session_state[state_key],
+        )
+        selected_api_key = st.session_state[state_key].strip()
+        provider_label = provider_info["display"]
+        env_fallback_value = os.getenv(env_var, "").strip()
+        if env_fallback_value and not selected_api_key:
+            st.caption(f"Usando fallback de ambiente: {env_var}.")
+
+        if st.button("Inicializar Modelo", type="primary"):
+            api_to_use = selected_api_key or env_fallback_value
+            model_to_use = model_override or None
+
+            if not api_to_use:
+                st.error(
+                    f"Informe a chave de API para {provider_label} ou configure {env_var}."
+                )
             else:
-                with st.spinner(f"Inicializando {model_option.title()}..."):
-                    success, agent, message = initialize_model(model_option, api_key)
+                with st.spinner(f"Inicializando {provider_label}..."):
+                    success, agent, message = initialize_model(
+                        provider_choice,
+                        api_to_use,
+                        model_to_use,
+                    )
 
                     if success:
                         st.session_state.eda_agent = agent
-                        st.session_state.selected_model = model_option
+                        st.session_state.selected_provider = provider_choice
+                        st.session_state.selected_model = provider_choice
+                        st.session_state.selected_model_name = getattr(
+                            agent, 'model_name', model_to_use or default_model
+                        )
                         st.session_state.model_initialized = True
-                        st.success(message)
+                        st.success(
+                            f"[OK] {provider_label} ativo com o modelo {st.session_state.selected_model_name}."
+                        )
 
-                        # Carregar base fiscal automaticamente se NF-e Validator estiver disponível
                         if NFE_VALIDATOR_AVAILABLE and st.session_state.fiscal_repository is None:
                             with st.spinner("Carregando base de dados fiscal..."):
                                 try:
@@ -1692,38 +1699,93 @@ def main():
                                         use_local_csv=True,
                                         use_ai_fallback=True
                                     )
-                                    st.success("✅ Base fiscal carregada com todas as camadas!")
-                                except Exception as e:
-                                    st.error(f"❌ Erro ao carregar base fiscal: {e}")
+                                    st.success("[OK] Base fiscal carregada com todas as camadas.")
+                                except Exception as e:  # noqa: BLE001
+                                    st.error(f"[ERRO] Falha ao carregar base fiscal: {e}")
 
                         st.rerun()
                     else:
                         st.error(message)
 
-        # Status do modelo
         if st.session_state.model_initialized and st.session_state.eda_agent:
+            active_provider = st.session_state.get("selected_provider", "gemini")
+            provider_display = provider_catalog.get(
+                active_provider, {}
+            ).get("display", active_provider.title())
+            active_model = st.session_state.get("selected_model_name") or getattr(
+                st.session_state.eda_agent, 'model_name', ''
+            )
+            status_label = provider_display if not active_model else f"{provider_display} - {active_model}"
+
             st.markdown(f"""
             <div class="success-box">
-                ✅ <strong>{st.session_state.selected_model.title()} Ativo!</strong>
+                &check; <strong>{status_label}</strong>
             </div>
             """, unsafe_allow_html=True)
 
         # NF-e Validator Settings (independente do EDA)
         if NFE_VALIDATOR_AVAILABLE:
+            st.markdown("---")
+            st.subheader("🧾 NF-e Validator")
+
             # Check if fiscal repository is loaded
             if 'fiscal_repository' not in st.session_state:
                 st.session_state.fiscal_repository = None
                 st.session_state.nfe_validated = False
                 st.session_state.nfe_results = None
 
-            # Show simple status
-            if st.session_state.fiscal_repository is not None:
-                st.markdown("---")
-                st.success("✅ Regras carregadas")
+            # Show status
+            if st.session_state.fiscal_repository is None:
+                st.info("💡 A base fiscal será carregada automaticamente ao inicializar o modelo")
+            else:
+                st.success("✅ Base fiscal carregada")
 
-                # Setup API key silently for AI validation
+                # Show repository layers status
+                try:
+                    layers_status = st.session_state.fiscal_repository.get_repository_layers_status()
+
+                    with st.expander("📊 Status das Camadas", expanded=False):
+                        st.metric("Camadas Ativas", f"{layers_status['total_camadas_ativas']}/{layers_status['camadas_disponiveis']}")
+
+                        for layer in layers_status['camadas_ativas']:
+                            st.success(f"✅ {layer}")
+
+                        # Detalhes CSV Local
+                        if layers_status['csv_local']['disponivel']:
+                            csv_stats = layers_status['csv_local']
+                            st.info(f"📄 CSV Local: {csv_stats['total_regras']} regras ({csv_stats['acucar_ncms']} açúcar + {csv_stats['insumos_ncms']} insumos)")
+
+                        # Detalhes SQLite
+                        if layers_status['sqlite']['disponivel']:
+                            st.info(f"💾 SQLite: {layers_status['sqlite']['total_ncm_rules']} NCMs cadastrados")
+                except Exception as e:
+                    st.warning(f"⚠️ Não foi possível obter estatísticas: {e}")
+
+                # Show repository stats (legacy)
+                try:
+                    stats = st.session_state.fiscal_repository.get_statistics()
+                    st.metric("Regras Carregadas", sum(stats.values()))
+                except:
+                    pass
+
+                # API Key for AI validation (optional, on-demand only)
+                st.markdown("**🤖 Agente IA (Opcional - Sob Demanda)**")
+
+                # Try to reuse Gemini API key if available
                 if st.session_state.model_initialized and st.session_state.eda_agent:
-                    st.session_state.ncm_api_key = st.session_state.eda_agent.api_key
+                    ncm_api_key = st.session_state.eda_agent.api_key
+                    st.info("✅ Usando chave da API")
+                    st.session_state.ncm_api_key = ncm_api_key
+                else:
+                    ncm_api_key = st.text_input(
+                        "Google API Key (Gemini):",
+                        type="password",
+                        help="Necessário apenas para validação com IA (sob demanda). A validação local funciona sem API key.",
+                        key="ncm_api_key"
+                    )
+                    st.session_state.ncm_api_key = ncm_api_key
+
+                st.caption("💡 A validação inicial NÃO usa IA - apenas regras locais (rápido)")
 
         # Sempre usar chat moderno
         if MODERN_CHAT_AVAILABLE:
@@ -1744,7 +1806,7 @@ def main():
 
                 with st.expander("📁 Arquivos de origem", expanded=False):
                     for source, count in sources.items():
-                        st.write(f"• **{source}:** {count:,} linhas")
+                        st.write(f"- **{source}:** {count:,} linhas")
             else:
                 st.success(f"📄 **{filename}**")
                 st.write(f"📏 **Dimensões:** {data.shape[0]:,} linhas × {data.shape[1]} colunas")
@@ -1818,54 +1880,34 @@ def main():
             # Informações sobre os modelos disponíveis com agentes
             st.subheader("🤖 Modelos de IA Disponíveis")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
 
             with col1:
                 st.markdown("""
-                ### 🧠 Google Gemini
-                **🌐 IA Avançada com Agentes**
-                - 🤖 **Agentes especializados** para análise
-                - 🧠 **LLM Gemini 2.5** (Flash/Pro)
-                - 📊 **Geração automática** de código Python
-                - 🔍 **Análise contextual** dos dados
-                - ⚠️ Requer API key do Google
+                ### Modelos com Agentes
+                **IA avancada com orquestracao**
+                - Agentes especializados para analise
+                - LLM configuravel (Gemini, OpenAI, Claude ou Groq)
+                - Geracao automatica de codigo Python
+                - Analise contextual dos dados
+                - Respostas detalhadas e insights profundos
+                - Utilize a API key do provedor escolhido na barra lateral
                 """)
 
             with col2:
                 st.markdown("""
-                ### 🔷 OpenAI GPT
-                **💡 GPT-4o Mini / GPT-4**
-                - 🤖 **Agentes especializados** para análise
-                - 🧠 **GPT-4o-mini** (econômico e rápido)
-                - 📊 **Geração automática** de código Python
-                - 🔍 **Análise contextual** dos dados
-                - ⚠️ Requer API key da OpenAI
-                """)
-
-            with col3:
-                st.markdown("""
-                ### ⚡ Grok (xAI)
-                **🚀 Grok Beta**
-                - 🤖 **Agentes especializados** para análise
-                - 🧠 **Grok Beta** (xAI)
-                - 📊 **Geração automática** de código Python
-                - 🔍 **Análise contextual** dos dados
-                - ⚠️ Requer API key do xAI
+                ### Recursos Avancados
+                **Funcionalidades premium**
+                - Memoria contextual entre perguntas
+                - Pipeline automatico de dados
+                - Visualizacoes dinamicas
+                - Analises especializadas
+                - Relatorios detalhados
+                - Clean Architecture enterprise
                 """)
 
             st.markdown("---")
-
-            # Mostrar modelo ativo
-            if st.session_state.model_initialized and st.session_state.selected_model:
-                model_names = {
-                    "gemini": "Google Gemini",
-                    "openai": "OpenAI GPT",
-                    "grok": "Grok (xAI)"
-                }
-                active_model = model_names.get(st.session_state.selected_model, st.session_state.selected_model)
-                st.info(f"💡 **Modelo ativo**: **{active_model}** com agentes para orquestração inteligente de análises!")
-            else:
-                st.info("💡 **Escolha uma API**: Configure uma chave de API (Gemini, OpenAI ou Grok) e clique em 'Inicializar Modelo'")
+            st.info("💡 **Modelo ativo**: **Gemini** com agentes para orquestração inteligente de análises complexas!")
 
         elif st.session_state.current_data is None:
             st.info("👆 Faça upload de um arquivo CSV na barra lateral para começar a análise.")
@@ -1906,21 +1948,21 @@ def main():
 
                     with col_desc1:
                         st.write("**📋 Estrutura do Dataset de Fraude:**")
-                        st.write("• **Time**: Segundos desde primeira transação")
-                        st.write("• **V1-V28**: Componentes PCA (dados anonimizados)")
-                        st.write("• **Amount**: Valor da transação")
-                        st.write("• **Class**: 0=Normal, 1=Fraudulenta")
+                        st.write("- **Time**: Segundos desde primeira transação")
+                        st.write("- **V1-V28**: Componentes PCA (dados anonimizados)")
+                        st.write("- **Amount**: Valor da transação")
+                        st.write("- **Class**: 0=Normal, 1=Fraudulenta")
 
                     with col_desc2:
                         st.write("**📊 Estatísticas Rápidas:**")
-                        st.write(f"• Total de transações: {len(data):,}")
-                        st.write(f"• Período: {data['Time'].min():.0f}s a {data['Time'].max():.0f}s")
-                        st.write(f"• Valor médio: R$ {data['Amount'].mean():.2f}")
-                        st.write(f"• Valor máximo: R$ {data['Amount'].max():.2f}")
+                        st.write(f"- Total de transações: {len(data):,}")
+                        st.write(f"- Período: {data['Time'].min():.0f}s a {data['Time'].max():.0f}s")
+                        st.write(f"- Valor médio: R$ {data['Amount'].mean():.2f}")
+                        st.write(f"- Valor máximo: R$ {data['Amount'].max():.2f}")
 
                 # Mostrar primeiras linhas
                 st.write("**🔍 Primeiras 10 linhas:**")
-                st.dataframe(data.head(10), width="stretch")
+                st.dataframe(data.head(10), use_container_width=True)
 
                 # Mostrar informações dos tipos de dados
                 st.write("**🔤 Tipos de Dados:**")
@@ -1994,7 +2036,7 @@ def main():
                             st.markdown(f"""
                             <div class="user-message">
                                 {question_text}
-                                <div class="message-timestamp">Você • {conv['timestamp'].strftime('%H:%M:%S')}</div>
+                                <div class="message-timestamp">Você - {conv['timestamp'].strftime('%H:%M:%S')}</div>
                             </div>
                             """, unsafe_allow_html=True)
 
@@ -2019,7 +2061,7 @@ def main():
                             st.markdown(f"""
                             <div class="assistant-message">
                                 {formatted_answer}
-                                <div class="message-timestamp">{model_name} • {conv['timestamp'].strftime('%H:%M:%S')}</div>
+                                <div class="message-timestamp">{model_name} - {conv['timestamp'].strftime('%H:%M:%S')}</div>
                             </div>
                             """, unsafe_allow_html=True)
 
@@ -2274,14 +2316,14 @@ def render_classic_chat(model_name: str):
             col_sug1, col_sug2 = st.columns(2)
 
             with col_sug1:
-                st.write("• Distribuição de classes (fraude vs normal)")
-                st.write("• Análise temporal das transações")
-                st.write("• Correlação entre variáveis V1-V28")
+                st.write("- Distribuição de classes (fraude vs normal)")
+                st.write("- Análise temporal das transações")
+                st.write("- Correlação entre variáveis V1-V28")
 
             with col_sug2:
-                st.write("• Outliers em valores de transação")
-                st.write("• Padrões de hora do dia")
-                st.write("• Série temporal das transações")
+                st.write("- Outliers em valores de transação")
+                st.write("- Padrões de hora do dia")
+                st.write("- Série temporal das transações")
 
     # Continuar com a interface clássica existente...
     # (O resto do código de chat atual continua aqui)

@@ -6,20 +6,110 @@ This module contains the main EDA agent that can analyze CSV files and answer qu
 about data using various analysis techniques and visualizations.
 """
 
-import pandas as pd
-import numpy as np
+import io
+import os
+import sys
+import unicodedata
+from contextlib import redirect_stdout, redirect_stderr
+from typing import Any, Dict, List, Optional
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-from typing import Dict, Any, List, Optional
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import Tool, AgentExecutor, create_react_agent
+from langchain.agents import AgentExecutor, Tool, create_react_agent
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.tools import tool
 from langchain.schema.output_parser import StrOutputParser
-import io
-import sys
-from contextlib import redirect_stdout, redirect_stderr
+from langchain.tools import tool
+
+# --------------------------------------------------------------------------- #
+# Helpers for provider/model normalisation
+# --------------------------------------------------------------------------- #
+
+
+def _strip_accents(value: str) -> str:
+    """Convert a string to ASCII by stripping accents and em dashes."""
+    raw = value or ""
+    normalised = unicodedata.normalize("NFKD", raw)
+    ascii_only = normalised.encode("ascii", "ignore").decode("ascii")
+    return ascii_only.replace("\\u2013", "-").replace("\\u2014", "-")
+
+
+def _normalize_provider(provider: str) -> str:
+    """Map different provider aliases to canonical identifiers."""
+    alias = (provider or "").strip().lower()
+    if alias in {"google", "gemini"}:
+        return "gemini"
+    if alias in {"openai", "oai"}:
+        return "openai"
+    if alias in {"anthropic", "claude"}:
+        return "claude"
+    if alias in {"groq"}:
+        return "groq"
+    return alias
+
+
+def _normalize_model(provider: str, model: Optional[str]) -> Optional[str]:
+    """Select sensible defaults when model is omitted or provide aliases."""
+    if not model:
+        if provider == "gemini":
+            return "gemini-1.5-pro"
+        if provider == "openai":
+            return "gpt-4o-mini"
+        if provider == "claude":
+            return "claude-3-5-sonnet-20240620"
+        if provider == "groq":
+            return "llama-3.3-70b-versatile"
+        return None
+
+    cleaned = _strip_accents(model).strip().lower()
+
+    if provider == "gemini":
+        if cleaned in {"flash", "gemini-2.5-flash"}:
+            return "gemini-2.5-flash"
+        if cleaned in {"flash-exp", "gemini-2.0-flash-exp"}:
+            return "gemini-2.0-flash-exp"
+        if cleaned in {"1.5-pro", "gemini-1.5-pro"}:
+            return "gemini-1.5-pro"
+    if provider == "openai":
+        if cleaned in {"gpt4o-mini", "gpt-4o-mini"}:
+            return "gpt-4o-mini"
+        if cleaned in {"gpt4o", "gpt-4o"}:
+            return "gpt-4o"
+    if provider == "claude":
+        aliases = {
+            "claude-35-sonnet-20240620": "claude-3-5-sonnet-20240620",
+            "claude-3-5-sonnet": "claude-3-5-sonnet-20240620",
+            "claude-3-5-sonnet-20241022": "claude-3-5-sonnet-20240620",
+        }
+        return aliases.get(cleaned, model)
+    if provider == "groq":
+        aliases = {
+            "llama-33-70b-versatile": "llama-3.3-70b-versatile",
+            "llama-3.3-70b-versatil": "llama-3.3-70b-versatile",
+            "llama3.3-70b-versatile": "llama-3.3-70b-versatile",
+        }
+        return aliases.get(cleaned, model)
+    return model
+
+
+def _provider_env_var(provider: str) -> Optional[str]:
+    """Return the environment variable name expected for a provider."""
+    mapping = {
+        "gemini": "GOOGLE_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "claude": "ANTHROPIC_API_KEY",
+        "groq": "GROQ_API_KEY",
+    }
+    return mapping.get(provider)
+
+
+def _export_env_for_provider(provider: str, api_key: str) -> None:
+    """Persist API key in the relevant environment variable for SDKs."""
+    env_var = _provider_env_var(provider)
+    if env_var:
+        os.environ[env_var] = api_key or ""
 # offline_analyzer removido - não mais necessário
 
 class EDAAgent:
@@ -27,21 +117,29 @@ class EDAAgent:
     Main EDA Agent class that provides comprehensive data analysis capabilities
     """
 
-    def __init__(self, model_type: str = "gemini", api_key: str = None):
+    def __init__(
+        self,
+        provider: str = "gemini",
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         """
-        Initialize the EDA Agent with AI model
-
-        Modelos suportados: Gemini, OpenAI, Grok
+        Initialize the EDA Agent with a configurable LLM provider.
 
         Args:
-            model_type (str): "gemini", "openai" ou "grok"
-            api_key (str): API key correspondente (obrigatória)
+            provider: Target LLM provider identifier (gemini, openai, claude, groq).
+            model: Optional custom model name for the provider.
+            api_key: API key associated with the selected provider.
         """
-        if model_type not in ["gemini", "openai", "grok"]:
-            raise ValueError(f"Modelo '{model_type}' não é suportado. Use: gemini, openai ou grok")
+        self.provider = _normalize_provider(provider or "gemini")
+        self.model_name = _normalize_model(self.provider, model)
+        self.api_key = (api_key or "").strip()
 
-        self.model_type = model_type
-        self.api_key = api_key
+        if not self.api_key:
+            env_var = _provider_env_var(self.provider)
+            if env_var:
+                self.api_key = os.getenv(env_var, "").strip()
+
         self.data = None
         self.filename = None
         self.offline_analyzer = None  # Mantido apenas para compatibilidade de tools
@@ -49,29 +147,37 @@ class EDAAgent:
         self.api_available = False
         self.chart_callback = None
 
-        # Sistema de memória expandido para conclusões e contexto
-        self.analysis_history = []  # Histórico de análises realizadas
-        self.conclusions_memory = []  # Conclusões extraídas
-        self.session_context = {  # Contexto da sessão atual
+        # Memorias da sessao
+        self.analysis_history = []
+        self.conclusions_memory = []
+        self.session_context = {
             'dataset_summary': None,
             'key_findings': [],
-            'analysis_count': 0
+            'analysis_count': 0,
         }
 
-        # Initialize based on model type - APENAS AGENTES
-        if model_type == "gemini" and api_key:
-            self._init_gemini(api_key)
-        elif model_type == "openai" and api_key:
-            self._init_openai(api_key)
-        elif model_type == "grok" and api_key:
-            self._init_grok(api_key)
-        else:
-            raise ValueError(f"Configuração inválida para {model_type}. API key é obrigatória.")
+        init_map = {
+            "gemini": self._init_gemini,
+            "openai": self._init_openai,
+            "claude": self._init_claude,
+            "groq": self._init_groq,
+        }
 
-        # SEMPRE inicializar agentes quando API estiver disponível
+        if self.provider not in init_map:
+            raise ValueError(f"Provedor '{self.provider}' nao suportado.")
+
+        if not self.api_key:
+            env_hint = _provider_env_var(self.provider) or "API key"
+            raise ValueError(
+                f"API key obrigatoria para '{self.provider}'. "
+                f"Configure {env_hint} ou informe api_key."
+            )
+
+        _export_env_for_provider(self.provider, self.api_key)
+        init_map[self.provider](self.api_key, self.model_name)
+
         if self.api_available:
-            print(f"✅ {model_type.title()} inicializado - configurando agentes...")
-            # Memória aprimorada para manter contexto de análises
+            print(f"✅ {self.provider.title()} inicializado - configurando agentes...")
             from langchain.memory import ConversationSummaryBufferMemory
 
             self.memory = ConversationSummaryBufferMemory(
@@ -79,109 +185,179 @@ class EDAAgent:
                 memory_key="chat_history",
                 return_messages=True,
                 input_key="input",
-                max_token_limit=2000,  # Manter histórico substancial
-                summary_message_cls=None  # Usar mensagens padrão
+                max_token_limit=2000,
+                summary_message_cls=None,
             )
             self.tools = self._create_tools()
             self.agent_executor = self._create_agent()
-            print(f"🤖 Agentes configurados para {model_type.title()}")
+            print(f"🤖 Agentes configurados para {self.provider.title()} ({self.model_name})")
         else:
-            raise RuntimeError(f"Falha ao inicializar {model_type.title()}. Agentes são obrigatórios.")
+            raise RuntimeError(f"Falha ao inicializar {self.provider}. Agentes sao obrigatorios.")
 
-    def _init_gemini(self, api_key: str):
-        """Initialize Google Gemini"""
+    def _init_gemini(self, api_key: str, model_name: Optional[str]) -> None:
+        """Initialize Google Gemini provider."""
         try:
-            # Tentar modelos Gemini 2.5 disponíveis em ordem de prioridade
-            models_to_try = [
-                'gemini-2.5-flash',
-                'gemini-2.5-pro',
-                'gemini-2.0-flash-exp'
-            ]
+            from langchain_google_genai import ChatGoogleGenerativeAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-google-genai nao instalado. Execute 'pip install langchain-google-genai'."
+            ) from exc
 
-            for model_name in models_to_try:
-                try:
-                    print(f"🔄 Tentando inicializar {model_name}...")
-                    self.llm = ChatGoogleGenerativeAI(
-                        temperature=0.1,
-                        model=model_name,
-                        google_api_key=api_key,
-                        max_output_tokens=4096,  # Valor mais conservador
-                        convert_system_message_to_human=True,
-                        max_retries=2,  # Reduzido para evitar loops
-                        request_timeout=120,  # Timeout aumentado para 2 min
-                        streaming=False  # Desabilitar streaming que pode causar problemas
-                    )
+        preferred = [model_name] if model_name else []
+        fallback = [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+        ]
 
-                    # Testar inicialização com uma pergunta simples
-                    test_response = self.llm.invoke([{"role": "user", "content": "Teste: responda apenas 'OK'"}])
-                    if test_response and test_response.content:
-                        self.api_available = True
-                        print(f"✅ Google Gemini inicializado com sucesso: {model_name}")
-                        return
-                    else:
-                        print(f"⚠️ {model_name} retornou resposta vazia")
+        candidates: List[str] = []
+        for candidate in preferred + fallback:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
 
-                except Exception as model_error:
-                    print(f"❌ Falha com {model_name}: {model_error}")
-                    continue
+        errors: List[str] = []
 
-            # Se chegou aqui, nenhum modelo funcionou
-            raise Exception("Nenhum modelo Gemini disponível funcionou")
-
-        except Exception as e:
-            print(f"❌ Falha ao inicializar Google Gemini: {e}")
-            self.api_available = False
-
-    def _init_openai(self, api_key: str):
-        """Initialize OpenAI"""
-        try:
+        for candidate in candidates:
             try:
-                from langchain_openai import ChatOpenAI
-            except ImportError:
-                from langchain.chat_models import ChatOpenAI
+                print(f"[INFO] Tentando inicializar {candidate}...")
+                self.llm = ChatGoogleGenerativeAI(
+                    temperature=0.1,
+                    model=candidate,
+                    google_api_key=api_key,
+                    max_output_tokens=4096,
+                    convert_system_message_to_human=True,
+                    max_retries=2,
+                    request_timeout=120,
+                    streaming=False,
+                )
 
-            # Configurar OpenAI sem testar (igual ao Gemini)
-            print(f"🔄 Configurando OpenAI...")
+                test_response = self.llm.invoke([
+                    {"role": "user", "content": "Teste: responda apenas 'OK'"}
+                ])
+                if getattr(test_response, "content", None):
+                    self.api_available = True
+                    self.model_name = candidate
+                    print(f"[OK] Google Gemini inicializado com sucesso: {candidate}")
+                    return
+
+                print(f"[WARN] {candidate} retornou resposta vazia; tentando proximo modelo.")
+            except Exception as err:  # noqa: BLE001
+                error_msg = f"{candidate}: {err}"
+                errors.append(error_msg)
+                print(f"[ERROR] Falha com {candidate}: {err}")
+
+        self.api_available = False
+        details = "; ".join(errors) if errors else "Modelos indisponiveis."
+        raise RuntimeError(f"Falha ao inicializar Google Gemini ({details})")
+
+    def _init_openai(self, api_key: str, model_name: Optional[str]) -> None:
+        """Initialize OpenAI provider."""
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-openai nao instalado. Execute 'pip install langchain-openai'."
+            ) from exc
+
+        selected_model = model_name or "gpt-4o-mini"
+
+        try:
             self.llm = ChatOpenAI(
+                model=selected_model,
                 temperature=0.1,
-                model='gpt-4o-mini',  # Usar modelo padrão
                 openai_api_key=api_key,
                 max_tokens=4096,
-                request_timeout=120
+                timeout=120,
+                max_retries=2,
             )
+            test_response = self.llm.invoke([
+                {"role": "user", "content": "Teste: responda apenas 'OK'"}
+            ])
+            if getattr(test_response, "content", None):
+                self.api_available = True
+                self.model_name = selected_model
+                print(f"[OK] OpenAI inicializado com sucesso: {selected_model}")
+                return
 
-            self.api_available = True
-            print(f"✅ OpenAI configurado com sucesso")
+            print(f"[WARN] Modelo OpenAI {selected_model} retornou resposta vazia.")
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"Falha ao inicializar OpenAI: {err}") from err
 
-        except Exception as e:
-            print(f"❌ Falha ao configurar OpenAI: {e}")
-            self.api_available = False
+        self.api_available = False
+        raise RuntimeError("Falha ao inicializar OpenAI; resposta vazia do modelo.")
 
-    def _init_grok(self, api_key: str):
-        """Initialize Grok (xAI)"""
+    def _init_claude(self, api_key: str, model_name: Optional[str]) -> None:
+        """Initialize Anthropic Claude provider."""
         try:
-            try:
-                from langchain_openai import ChatOpenAI
-            except ImportError:
-                from langchain.chat_models import ChatOpenAI
+            from langchain_anthropic import ChatAnthropic
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-anthropic nao instalado. Execute 'pip install langchain-anthropic'."
+            ) from exc
 
-            # Configurar Grok sem testar (igual ao Gemini)
-            print(f"🔄 Configurando Grok...")
-            self.llm = ChatOpenAI(
+        selected_model = model_name or "claude-3-5-sonnet-20240620"
+
+        try:
+            self.llm = ChatAnthropic(
+                model=selected_model,
                 temperature=0.1,
-                model="grok-beta",
-                openai_api_key=api_key,
-                base_url="https://api.x.ai/v1",  # Endpoint do Grok
+                anthropic_api_key=api_key,
                 max_tokens=4096,
-                request_timeout=120
+                timeout=120,
+                max_retries=2,
             )
+            test_response = self.llm.invoke([
+                {"role": "user", "content": "Teste: responda apenas 'OK'"}
+            ])
+            if getattr(test_response, "content", None):
+                self.api_available = True
+                self.model_name = selected_model
+                print(f"[OK] Claude inicializado com sucesso: {selected_model}")
+                return
 
-            self.api_available = True
-            print(f"✅ Grok configurado com sucesso")
+            print(f"[WARN] Modelo Claude {selected_model} retornou resposta vazia.")
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"Falha ao inicializar Claude: {err}") from err
 
-        except Exception as e:
-            print(f"❌ Falha ao configurar Grok: {e}")
-            self.api_available = False
+        self.api_available = False
+        raise RuntimeError("Falha ao inicializar Claude; resposta vazia do modelo.")
+
+    def _init_groq(self, api_key: str, model_name: Optional[str]) -> None:
+        """Initialize Groq provider."""
+        try:
+            from langchain_groq import ChatGroq
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-groq nao instalado. Execute 'pip install langchain-groq'."
+            ) from exc
+
+        selected_model = model_name or "llama-3.3-70b-versatile"
+
+        try:
+            self.llm = ChatGroq(
+                model=selected_model,
+                temperature=0.1,
+                groq_api_key=api_key,
+                max_tokens=4096,
+                timeout=120,
+                max_retries=2,
+            )
+            test_response = self.llm.invoke([
+                {"role": "user", "content": "Teste: responda apenas 'OK'"}
+            ])
+            if getattr(test_response, "content", None):
+                self.api_available = True
+                self.model_name = selected_model
+                print(f"[OK] Groq inicializado com sucesso: {selected_model}")
+                return
+
+            print(f"[WARN] Modelo Groq {selected_model} retornou resposta vazia.")
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"Falha ao inicializar Groq: {err}") from err
+
+        self.api_available = False
+        raise RuntimeError("Falha ao inicializar Groq; resposta vazia do modelo.")
 
     def load_data(self, file_path: str) -> bool:
         """
@@ -982,10 +1158,10 @@ Thought:{agent_scratchpad}""")
 
         # APENAS AGENTES - sem fallback offline
         if not self.api_available or not self.agent_executor:
-            return f"❌ Erro: Agente {self.model_type} não está disponível. Verifique a configuração."
+            return f"❌ Erro: Agente {self.provider} não está disponível. Verifique a configuração."
 
         try:
-            print(f"🤖 Executando pergunta via agente {self.model_type.title()}...")
+            print(f"🤖 Executando pergunta via agente {self.provider.title()}...")
 
             # Proteger contra StopIteration com try-catch específico
             try:
@@ -1021,17 +1197,17 @@ Thought:{agent_scratchpad}""")
 
         except RuntimeError as e:
             error_msg = str(e)
-            print(f"❌ RuntimeError no agente {self.model_type}: {error_msg[:100]}")
+            print(f"❌ RuntimeError no agente {self.provider}: {error_msg[:100]}")
 
             # Tratamento específico para StopIteration convertido
             if "generator" in error_msg.lower() or "stopiteration" in error_msg.lower():
-                return f"❌ Erro de gerador no {self.model_type.title()}. Pode estar relacionado à versão do SDK.\n\n💡 Tente reformular a pergunta ou reinicialize o modelo."
+                return f"❌ Erro de gerador no {self.provider.title()}. Pode estar relacionado à versão do SDK.\n\n💡 Tente reformular a pergunta ou reinicialize o modelo."
             else:
-                return f"❌ Erro no agente {self.model_type.title()}: {error_msg[:200]}\n\n💡 Tente uma pergunta mais simples ou reinicialize o modelo."
+                return f"❌ Erro no agente {self.provider.title()}: {error_msg[:200]}\n\n💡 Tente uma pergunta mais simples ou reinicialize o modelo."
 
         except Exception as e:
             error_str = str(e)
-            print(f"❌ Erro geral no agente {self.model_type}: {error_str[:100]}")
+            print(f"❌ Erro geral no agente {self.provider}: {error_str[:100]}")
 
             # Tratamento específico para "No generation chunks were returned"
             if "no generation chunks were returned" in error_str.lower():
@@ -1051,11 +1227,11 @@ Thought:{agent_scratchpad}""")
 
             # Tratamento específico de erros de API
             elif any(keyword in error_str.lower() for keyword in ['quota', 'exceeded', '429', 'rate limit']):
-                return f"⚠️ Cota da API {self.model_type.title()} excedida.\n\n💡 Aguarde um momento e tente novamente."
+                return f"⚠️ Cota da API {self.provider.title()} excedida.\n\n💡 Aguarde um momento e tente novamente."
             elif "stopiteration" in error_str.lower():
-                return f"❌ Erro de iterador no {self.model_type.title()}. Versão do SDK pode ser incompatível.\n\n💡 Tente reformular a pergunta ou verifique a versão do google-generativeai."
+                return f"❌ Erro de iterador no {self.provider.title()}. Versão do SDK pode ser incompatível.\n\n💡 Tente reformular a pergunta ou verifique a versão do google-generativeai."
             else:
-                return f"❌ Erro no agente {self.model_type.title()}: {error_str[:200]}\n\n💡 Verifique sua configuração ou tente novamente."
+                return f"❌ Erro no agente {self.provider.title()}: {error_str[:200]}\n\n💡 Verifique sua configuração ou tente novamente."
 
     # MODO OFFLINE REMOVIDO - Apenas métodos de análise auxiliares mantidos
 

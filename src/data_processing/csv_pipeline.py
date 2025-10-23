@@ -152,18 +152,19 @@ class CSVPipeline:
                 {
                     'sep': ',',
                     'encoding': encoding,
-                    'low_memory': False,
                     'engine': 'python',
                     'skipinitialspace': True,
-                    'error_bad_lines': False,
-                    'warn_bad_lines': False
+                    'on_bad_lines': 'skip'
                 }
             ]
 
             for i, params in enumerate(reading_strategies):
                 try:
+                    params_copy = params.copy()
+                    if params_copy.get('engine') == 'python':
+                        params_copy.pop('low_memory', None)
                     print(f"      • Tentativa {i+1}: {list(params.keys())}")
-                    data = pd.read_csv(file_path, **params)
+                    data = pd.read_csv(file_path, **params_copy)
 
                     print(f"      • Resultado: {data.shape[1]} colunas")
 
@@ -204,7 +205,22 @@ class CSVPipeline:
 
         # Se tudo falhou, retornar dados como estão
         print("      Usando fallback: leitura simples")
-        fallback_data = pd.read_csv(file_path, encoding=encoding, low_memory=False)
+        try:
+            fallback_data = pd.read_csv(
+                file_path,
+                encoding=encoding,
+                engine='python',
+                on_bad_lines='skip'
+            )
+        except TypeError:
+            # Compatibilidade com pandas < 1.4 (parâmetros antigos)
+            fallback_data = pd.read_csv(  # type: ignore[call-arg]
+                file_path,
+                encoding=encoding,
+                engine='python',
+                error_bad_lines=False,
+                warn_bad_lines=False
+            )
         return ',', fallback_data
 
     def _force_comma_parsing(self, file_path: str, encoding: str, expected_columns: int) -> Tuple[str, pd.DataFrame]:
