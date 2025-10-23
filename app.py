@@ -230,7 +230,17 @@ def initialize_model(provider: str, api_key: str = None, model_name: str = None)
         return False, None, f"[ERRO] Falha ao inicializar {provider_display}. Verifique configuracao."
 
     except Exception as e:  # noqa: BLE001
-        return False, None, f"[ERRO] {str(e)}"
+        error_msg = str(e)
+
+        # Mensagens de erro mais amigáveis
+        if "credit balance is too low" in error_msg.lower():
+            return False, None, f"[ERRO] Claude: Saldo de créditos insuficiente. Adicione créditos em: https://console.anthropic.com/settings/plans"
+        elif "invalid_api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+            return False, None, f"[ERRO] {provider_display}: API Key inválida. Verifique sua chave."
+        elif "rate_limit" in error_msg.lower():
+            return False, None, f"[ERRO] {provider_display}: Limite de requisições excedido. Aguarde alguns minutos."
+        else:
+            return False, None, f"[ERRO] {provider_display}: {error_msg}"
 
 
 def analyze_csv_structure(file_content):
