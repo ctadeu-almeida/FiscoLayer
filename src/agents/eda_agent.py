@@ -380,8 +380,8 @@ class EDAAgent:
             self.llm = ChatOpenAI(
                 model=selected_model,
                 temperature=0.1,
-                openai_api_key=api_key,
-                openai_api_base="https://api.x.ai/v1",
+                api_key=api_key,
+                base_url="https://api.x.ai/v1",
                 max_tokens=4096,
                 timeout=120,
                 max_retries=2,
