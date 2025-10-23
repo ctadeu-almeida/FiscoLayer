@@ -376,11 +376,14 @@ class EDAAgent:
 
         selected_model = model_name or "grok-beta"
 
+        # Configurar API key no ambiente para xAI
+        import os
+        os.environ["OPENAI_API_KEY"] = api_key
+
         try:
             self.llm = ChatOpenAI(
                 model=selected_model,
                 temperature=0.1,
-                api_key=api_key,
                 base_url="https://api.x.ai/v1",
                 max_tokens=4096,
                 timeout=120,
