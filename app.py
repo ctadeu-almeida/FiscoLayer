@@ -212,18 +212,20 @@ def initialize_session_state():
 
 def initialize_model(provider: str, api_key: str = None, model_name: str = None) -> tuple:
     """Inicializar modelo selecionado"""
+    # Definir provider_display antes do try para evitar UnboundLocalError
+    provider_display = {
+        'gemini': 'Google Gemini',
+        'openai': 'OpenAI',
+        'claude': 'Claude',
+        'groq': 'Groq',
+    }.get(provider, provider.replace('_', ' ').title())
+
     try:
         # Configurar diretorios
         setup_directories()
 
         # Criar agente com modelo selecionado - sempre com agentes
         agent = EDAAgent(provider=provider, model=model_name, api_key=api_key)
-        provider_display = {
-            'gemini': 'Google Gemini',
-            'openai': 'OpenAI',
-            'claude': 'Claude',
-            'groq': 'Groq',
-        }.get(provider, provider.replace('_', ' ').title())
 
         if agent.api_available:
             return True, agent, f"[OK] {provider_display} inicializado com agentes."
