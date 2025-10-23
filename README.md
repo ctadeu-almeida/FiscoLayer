@@ -1,11 +1,11 @@
 # Sistema EDA + NF-e Validator
 
-**Versão:** 1.0.0
+**Versão:** 1.1.0
 **Módulos:**
-- **CSVEDA** - Análise Exploratória de Dados com IA (Gemini 2.5)
+- **CSVEDA** - Análise Exploratória de Dados com IA (Multi-Provider)
 - **NF-e Validator** - Validação Fiscal Automatizada para Setor Sucroalcooleiro
 
-Sistema integrado que combina análise exploratória de dados CSV com validação fiscal automatizada de NF-e, utilizando agentes de IA com Google Gemini 2.5.
+Sistema integrado que combina análise exploratória de dados CSV com validação fiscal automatizada de NF-e, utilizando agentes de IA com suporte para múltiplos provedores (Gemini, OpenAI, Grok).
 
 ---
 
@@ -15,7 +15,8 @@ Este sistema oferece **duas funcionalidades complementares** em uma única aplic
 
 ### 📊 Módulo CSVEDA (Original)
 - Análise exploratória de dados CSV/ZIP
-- Agentes de IA especializados com Google Gemini 2.5
+- **Suporte a 3 provedores de IA**: Google Gemini 2.5, OpenAI GPT-4, Grok (xAI)
+- Seleção automática de API por prioridade (Gemini > OpenAI > Grok)
 - Geração automática de gráficos e insights
 - Pipeline de processamento de dados
 - Mesclagem de múltiplos arquivos CSV
@@ -23,12 +24,13 @@ Este sistema oferece **duas funcionalidades complementares** em uma única aplic
 
 ### 🧾 Módulo NF-e Validator (Complementar)
 - **Validação em 3 camadas**: CSV Local → SQLite → LLM (sob demanda)
+- **Carregamento automático da base fiscal** ao inicializar modelo
 - Validação rápida local sem uso de API
 - Mapeamento inteligente de colunas (reconhece variações)
 - Validação parcial com dados incompletos
 - Foco no setor sucroalcooleiro (açúcar + insumos agrícolas)
 - 35+ regras fiscais editáveis em `base_validacao.csv`
-- Agente IA para classificação NCM (opcional)
+- Agente IA multi-modelo para classificação NCM (opcional)
 - Relatórios detalhados em JSON e Markdown
 
 ---
@@ -90,7 +92,10 @@ src/
 - **CSV Local** (`base_validacao.csv` - 35+ regras editáveis)
 - **SQLite** (`rules.db` - base padrão)
 - **LangChain** (ReAct agent pattern)
-- **Google Gemini 2.5** (LLM - sob demanda)
+- **Provedores de IA**:
+  - **Google Gemini 2.5** Flash/Pro (padrão recomendado)
+  - **OpenAI GPT-4** / GPT-4o Mini
+  - **Grok** (xAI Beta)
 - **Streamlit** (Interface unificada)
 - **Pandas** (processamento sem limites)
 
@@ -161,9 +166,12 @@ A aplicação abrirá com **duas tabs**:
 
 **Passo a passo:**
 
-1. **Configurar API Gemini** (sidebar):
-   - Insira sua chave da API do Google Gemini
+1. **Configurar API de IA** (sidebar):
+   - Escolha um provedor: **Gemini** (recomendado), **OpenAI** ou **Grok**
+   - Insira a chave da API correspondente
+   - Sistema detecta automaticamente qual API usar por prioridade
    - Clique em "🚀 Inicializar Modelo"
+   - Base fiscal é carregada automaticamente
 
 2. **Upload de Dados** (sidebar):
    - Selecione arquivo CSV ou ZIP
@@ -192,13 +200,15 @@ A aplicação abrirá com **duas tabs**:
 
 **Passo a passo:**
 
-1. **Configurar Camadas de Validação** (sidebar):
-   - ✅ CSV Local (`base_validacao.csv`) - Prioridade máxima
-   - ✅ SQLite (`rules.db`) - Sempre ativo
-   - ⚪ LLM (Gemini) - Sob demanda (opcional)
-   - Clique em "📚 Carregar Base Fiscal"
+1. **Inicializar Modelo** (Tab 1):
+   - Configure API de IA na Tab 1
+   - Clique em "🚀 Inicializar Modelo"
+   - **Base fiscal carregada automaticamente** com todas as camadas ativas:
+     - ✅ CSV Local (`base_validacao.csv`) - Prioridade máxima
+     - ✅ SQLite (`rules.db`) - Sempre ativo
+     - ✅ LLM Fallback - Sob demanda (opcional)
 
-2. **Carregar Dados no EDA** (Tab 1):
+2. **Carregar Dados** (Tab 1):
    - Faça upload do CSV de NF-e na aba EDA
    - Sistema detecta automaticamente as colunas
 
@@ -598,7 +608,8 @@ python tests/test_integration.py
 **Agentes de IA:**
 - EDA: Agentes especializados em análise exploratória
 - NF-e: Agente opcional para classificação NCM
-- Ambos usam Google Gemini 2.5 Pro
+- **Suporte multi-provider**: Gemini 2.5, OpenAI GPT-4, Grok
+- **Seleção automática** por prioridade configurável
 - ReAct pattern (Reasoning + Acting)
 
 ---
@@ -671,7 +682,21 @@ MIT License
 
 ## 📝 Changelog
 
-### v1.0.0 (Atual) - Sistema Completo Integrado ✅
+### v1.1.0 (Atual) - Suporte Multi-Provider IA ✅
+
+**Suporte para múltiplos provedores de IA e melhorias de UX**
+
+- ✅ **Suporte a 3 provedores de IA**: Gemini, OpenAI GPT-4, Grok (xAI)
+- ✅ **Seleção automática de API** por prioridade (Gemini > OpenAI > Grok)
+- ✅ **Carregamento automático da base fiscal** ao inicializar modelo
+- ✅ **Interface simplificada** - Redução de 3 para 2 passos no fluxo
+- ✅ **Todas camadas de validação ativas por padrão** (CSV + SQLite + LLM)
+- ✅ **Melhorias visuais** - Contraste otimizado (texto branco em fundo azul escuro)
+- ✅ **Display de modelos atualizado** - Layout 3 colunas com indicador dinâmico
+- ✅ **Dependências atualizadas** - matplotlib, seaborn, plotly, langchain-openai
+- ✅ **Arquitetura multi-modelo** - Agente EDA suporta múltiplos backends
+
+### v1.0.0 - Sistema Completo Integrado ✅
 
 **Aplicação unificada com EDA + NF-e Validator totalmente funcional**
 
