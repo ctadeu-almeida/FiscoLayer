@@ -45,6 +45,54 @@ try:
 except ImportError:
     NFE_VALIDATOR_AVAILABLE = False
 
+# Auto-popular database na primeira execução
+def ensure_database_populated():
+    """Garante que o database está populado na primeira execução"""
+    import sqlite3
+    import json
+
+    db_path = current_dir / "src" / "database" / "rules.db"
+    schema_path = current_dir / "src" / "database" / "schema.sql"
+
+    # Verificar se database existe e tem dados
+    if db_path.exists():
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM ncm_rules")
+            count = cursor.fetchone()[0]
+            conn.close()
+            if count > 0:
+                return  # Database já populado
+        except:
+            conn.close()
+
+    # Popular database
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not schema_path.exists():
+        return
+
+    # Importar e executar populate_db
+    sys.path.insert(0, str(current_dir / "scripts"))
+    try:
+        from populate_db import DatabasePopulator
+        populator = DatabasePopulator(str(db_path))
+        populator.connect()
+        populator.create_schema(str(schema_path))
+        populator.populate_ncm_rules()
+        populator.populate_pis_cofins_rules()
+        populator.populate_cfop_rules()
+        populator.populate_state_overrides()
+        populator.populate_legal_refs()
+        populator.update_metadata()
+        populator.close()
+    except Exception as e:
+        pass  # Silencioso para não quebrar a aplicação
+
+# Executar na inicialização
+ensure_database_populated()
+
 # Configuração da página Streamlit
 st.set_page_config(
     page_title="Sistema EDA - Análise Exploratória de Dados",

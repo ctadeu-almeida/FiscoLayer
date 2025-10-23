@@ -116,29 +116,13 @@ cd FiscoLayer
 pip install -r requirements.txt
 ```
 
-### 3. Popular Database
+### 3. Executar Aplicação
 
 ```bash
-python scripts/populate_db.py
+streamlit run app.py
 ```
 
-**Resultado esperado:**
-```
-[*] Populando Database - NF-e Validator MVP
-[*] Database: C:\app\ProgFinal\src\database\rules.db
-[INFO] Populando NCM Rules...
-[OK] 5 NCMs inseridos
-[INFO] Populando PIS/COFINS Rules...
-[OK] 7 CSTs inseridos
-[INFO] Populando CFOP Rules...
-[OK] 7 CFOPs inseridos
-[INFO] Populando State Overrides...
-[OK] 3 regras estaduais inseridas
-[INFO] Populando Legal References...
-[OK] 5 referências legais inseridas
-[STATS] Database populado com sucesso!
-Total de registros: 27
-```
+**Nota:** O database é populado automaticamente na primeira execução. Não é necessário executar `populate_db.py` manualmente.
 
 ---
 
@@ -714,19 +698,6 @@ MIT License
 - ✅ **Documentação atualizada** com guia de uso integrado
 - ✅ **CI/CD configurado** (GitHub Actions)
 
----
-
-## 🎉 Status do Projeto
-
-**✅ APLICAÇÃO COMPLETA E FUNCIONAL**
-
-Este repositório contém a aplicação integrada final com:
-- 📊 Sistema EDA para análise exploratória de dados
-- 🧾 Sistema NF-e Validator para validação fiscal
-- 🤖 Agentes de IA (Google Gemini 2.5)
-- 📚 Base de conhecimento legal (18 documentos)
-- 📈 Relatórios individuais e consolidados
-- 💾 Exportação em múltiplos formatos
 
 **Repositório:**
 - **FiscoLayer:** https://github.com/ctadeu-almeida/FiscoLayer.git
