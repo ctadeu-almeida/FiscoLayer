@@ -47,6 +47,8 @@ def _normalize_provider(provider: str) -> str:
         return "claude"
     if alias in {"groq"}:
         return "groq"
+    if alias in {"grok", "xai", "x.ai"}:
+        return "grok"
     return alias
 
 
@@ -61,6 +63,8 @@ def _normalize_model(provider: str, model: Optional[str]) -> Optional[str]:
             return "claude-3-5-sonnet-20240620"
         if provider == "groq":
             return "llama-3.3-70b-versatile"
+        if provider == "grok":
+            return "grok-beta"
         return None
 
     cleaned = _strip_accents(model).strip().lower()
@@ -101,6 +105,7 @@ def _provider_env_var(provider: str) -> Optional[str]:
         "openai": "OPENAI_API_KEY",
         "claude": "ANTHROPIC_API_KEY",
         "groq": "GROQ_API_KEY",
+        "grok": "XAI_API_KEY",
     }
     return mapping.get(provider)
 
@@ -161,6 +166,7 @@ class EDAAgent:
             "openai": self._init_openai,
             "claude": self._init_claude,
             "groq": self._init_groq,
+            "grok": self._init_grok,
         }
 
         if self.provider not in init_map:
@@ -358,6 +364,43 @@ class EDAAgent:
 
         self.api_available = False
         raise RuntimeError("Falha ao inicializar Groq; resposta vazia do modelo.")
+
+    def _init_grok(self, model_name: Optional[str], api_key: str) -> None:
+        """Initialize Grok (xAI) LLM."""
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-openai nao instalado. Execute 'pip install langchain-openai'."
+            ) from exc
+
+        selected_model = model_name or "grok-beta"
+
+        try:
+            self.llm = ChatOpenAI(
+                model=selected_model,
+                temperature=0.1,
+                openai_api_key=api_key,
+                openai_api_base="https://api.x.ai/v1",
+                max_tokens=4096,
+                timeout=120,
+                max_retries=2,
+            )
+            test_response = self.llm.invoke([
+                {"role": "user", "content": "Teste: responda apenas 'OK'"}
+            ])
+            if getattr(test_response, "content", None):
+                self.api_available = True
+                self.model_name = selected_model
+                print(f"[OK] Grok (xAI) inicializado com sucesso: {selected_model}")
+                return
+
+            print(f"[WARN] Modelo Grok {selected_model} retornou resposta vazia.")
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"Falha ao inicializar Grok: {err}") from err
+
+        self.api_available = False
+        raise RuntimeError("Falha ao inicializar Grok; resposta vazia do modelo.")
 
     def load_data(self, file_path: str) -> bool:
         """

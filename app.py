@@ -218,6 +218,7 @@ def initialize_model(provider: str, api_key: str = None, model_name: str = None)
         'openai': 'OpenAI',
         'claude': 'Claude',
         'groq': 'Groq',
+        'grok': 'Grok (xAI)',
     }.get(provider, provider.replace('_', ' ').title())
 
     try:
@@ -1672,6 +1673,13 @@ def main():
                 "env": "GROQ_API_KEY",
                 "state_key": "groq_api_key",
                 "default_model": "llama-3.3-70b-versatile",
+            },
+            "grok": {
+                "display": "Grok (xAI)",
+                "help": "Obtenha sua chave em: https://console.x.ai",
+                "env": "XAI_API_KEY",
+                "state_key": "grok_api_key",
+                "default_model": "grok-beta",
             },
         }
 
