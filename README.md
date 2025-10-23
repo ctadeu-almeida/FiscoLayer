@@ -698,6 +698,5 @@ MIT License
 - ✅ **Documentação atualizada** com guia de uso integrado
 - ✅ **CI/CD configurado** (GitHub Actions)
 
-
 **Repositório:**
 - **FiscoLayer:** https://github.com/ctadeu-almeida/FiscoLayer.git
